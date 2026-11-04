@@ -298,11 +298,29 @@ struct Memory::Impl {
         });
     }
 
+    // Block ids are 16-bit and wrap, so two unrelated mappings can share one. Every page of a
+    // linear host mapping stores the same pointer base, so compare that across the whole range.
+    [[nodiscard]] bool IsHostContiguous(const VAddr addr, const std::size_t size) const noexcept {
+        if (size == 0 || !AddressSpaceContains(*current_page_table, addr, size)) {
+            return false;
+        }
+        const u64 first = addr >> YUZU_PAGEBITS;
+        const u64 last = (addr + size - 1) >> YUZU_PAGEBITS;
+        const auto& entries = current_page_table->entries;
+        const uintptr_t base = entries[first].Pointer(true);
+        const u16 block = entries[first].Block();
+        for (u64 page = first + 1; page <= last; ++page) {
+            if (entries[page].Pointer(true) != base || entries[page].Block() != block) {
+                return false;
+            }
+        }
+        return true;
+    }
     [[nodiscard]] inline const u8* GetSpan(const VAddr addr, const std::size_t size) const noexcept {
-        return (current_page_table->entries[addr >> YUZU_PAGEBITS].Block() == current_page_table->entries[(addr + size) >> YUZU_PAGEBITS].Block()) ? GetPointerSilent(addr) : nullptr;
+        return IsHostContiguous(addr, size) ? GetPointerSilent(addr) : nullptr;
     }
     [[nodiscard]] inline u8* GetSpan(const VAddr addr, const std::size_t size) noexcept {
-        return (current_page_table->entries[addr >> YUZU_PAGEBITS].Block() == current_page_table->entries[(addr + size) >> YUZU_PAGEBITS].Block()) ? GetPointerSilent(addr) : nullptr;
+        return IsHostContiguous(addr, size) ? GetPointerSilent(addr) : nullptr;
     }
 
     bool WriteBlockImpl(const Common::ProcessAddress addr, const void* buffer, const std::size_t size, bool unsafe) {

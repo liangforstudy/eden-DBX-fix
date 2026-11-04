@@ -5,86 +5,48 @@
 # SPDX-FileCopyrightText: 2018 yuzu Emulator Project
 # SPDX-License-Identifier: GPL-2.0-or-later
 -->
-<!-- lang: en-GB -->
 
-<h1 align="center">
-  <br>
-  <a href="https://git.eden-emu.dev/eden-emu/eden"><img src="./dist/qt_themes/default/icons/256x256/eden.png" alt="Eden" width="200"></a>
-  <br>
-  <b>Eden</b>
-  <br>
-</h1>
+# Eden-DBX-fix
 
-<h4 align="center"><b>Eden</b> is a free and open-source (FOSS) Switch 1 emulator started by developer Camille LaVey.
-<br>
-Written in C++, with builds for Windows, Linux, macOS, Android, FreeBSD and more.
-</h4>
+An unofficial fork of the [Eden](https://git.eden-emu.dev/eden-emu/eden/) Nintendo Switch emulator. It contains a small patch aimed at Vulkan "Device loss" crashes seen in Dragon Quest X Offline (0100E2E0152E4000) on an RTX 5060 Laptop GPU.
 
-<p align="center">
-    </a>
-    <a href="https://discord.gg/HstXbPch7X">
-        <img src="https://img.shields.io/discord/1367654015269339267?color=5865F2&label=Eden&logo=discord&logoColor=white"
-            alt="Discord">
-    </a>
-    <a href="https://stt.gg/qKgFEAbH">
-        <img src="https://img.shields.io/revolt/invite/qKgFEAbH?color=d61f3a&label=Stoat"
-            alt="Stoat">
-    </a>
-</p>
+Everything else is upstream Eden as of 4 Nov 2026. For general documentation, downloads, builds and support, go to the upstream project:
+https://git.eden-emu.dev/eden-emu/eden/
 
-<p align="center">
-  <a href="#compatibility">Compatibility</a> |
-  <a href="#contribute">Contribute</a> |
-  <a href="#building">Building</a> |
-  <a href="#download">Download</a> |
-  <a href="#support">Support</a> |
-  <a href="#license">License</a>
-</p>
+Please don't report problems with this fork to the Eden developers.
 
-## Compatibility
+## Status
 
-The emulator is capable of running most commercial games at full speed, provided you meet the necessary hardware requirements.
+The patch has not been tested on hardware yet. It compiles (syntax-checked), but it has not been confirmed to stop the crash.
 
-A list of supported games will be available in future. Please be patient.
+## What changed
 
-Check out our [website](https://eden-emu.dev) for the latest news on exciting features, monthly progress reports, and more!
+### Memory span contiguity check (`src/core/memory.cpp`)
 
-[![Packaging status](https://repology.org/badge/vertical-allrepos/eden-emulator.svg)](https://repology.org/project/eden-emulator/versions)
+On current master, the game logs `assert current_block != 65535` in `core/memory.cpp` about 20 seconds in, and later crashes with `Device loss occurred!`.
 
-## Contribute
+- Every memory mapping gets a block id from a 16-bit counter. The counter is never reset, so after 65,535 mappings it wraps and unrelated mappings can end up with the same id.
+- `GetSpan` treated a range as one contiguous host region if the first page and the page after the end had the same block id. Once ids repeat, that check can pass for ranges that span two separate mappings. The caller then reads or writes host memory that belongs to something else.
+- `GetSpan` is used for IPC buffers, audio and NVDEC command buffers, so the bad data can end up on the GPU.
 
-To contribute to Eden; be it financially, code, bug reports, or otherwise, see our [Contributing guidelines](./CONTRIBUTING.md).
+The fix checks every page in the range. A range counts as contiguous only if every page has the same host pointer base and block id. Otherwise `GetSpan` returns `nullptr` and the caller uses the normal copy path. This also fixes an off-by-one: the old check looked at the page after the end of the range instead of the last page.
 
-## Documentation
+### Device loss location logging (`src/video_core/...`)
 
-We have a user manual! See our [User Handbook](./docs/user/README.md).
+`Device::ReportLoss` now takes the location that detected the loss and adds it to the log line:
+
+- `Device loss occurred! (scheduler submit)`: main GPU command submission
+- `Device loss occurred! (present blit submit)`: copying the frame to the swapchain
+- `Device loss occurred! (query results)`: reading GPU query results
+
+This makes it easier to tell a rendering fault from a presentation problem, such as the multi-GPU laptop issue reported upstream in [Issue-Reports #257](https://github.com/eden-emulator/Issue-Reports/issues/257).
 
 ## Building
 
-See the [General Build Guide](docs/Build.md)
+Same as upstream. See [docs/Build.md](docs/Build.md).
 
-For information on provided development tooling, see the [Tools directory](./tools)
-
-## Download
-
-You can download the latest releases from [our release page](https://git.eden-emu.dev/eden-emu/eden/releases).
-
-Save us some bandwidth! We have [mirrors available](./docs/user/ThirdParty.md#mirrors) as well.
+To get a GPU crash dump on NVIDIA, configure with `-DENABLE_NSIGHT_AFTERMATH=ON`. This needs the Nsight Aftermath SDK, with the `NSIGHT_AFTERMATH_SDK` environment variable pointing to it. Then enable Nsight Aftermath in the debug settings. Dumps are written to `%APPDATA%\eden\log\gpucrash\`.
 
 ## License
 
-Eden is licensed under the GPLv3 (or any later version). Refer to the [LICENSE.txt](https://git.eden-emu.dev/eden-emu/eden/src/branch/master/LICENSE.txt) file.
-
-## Special thanks
-
-Super special thanks to Cloudflare for preventing the git server from blowing up.
-
-- Yuzu
-- Ryujinx
-- Sudachi
-- Citron
-- Torzu
-- Suyu
-- Ryubing
-
-And everyone who continues or had contributed to the project! <3
+GPLv3 or later, same as upstream. See [LICENSE.txt](LICENSE.txt).

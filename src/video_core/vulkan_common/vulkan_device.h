@@ -245,7 +245,7 @@ public:
                            FormatType format_type) const;
 
     /// Reports a device loss.
-    void ReportLoss() const;
+    void ReportLoss(std::string_view where = {}) const;
 
     /// Reports a shader to Nsight Aftermath.
     void SaveShader(std::span<const u32> spirv) const;

@@ -372,7 +372,7 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
             }
             break;
         case VK_ERROR_DEVICE_LOST:
-            device.ReportLoss();
+            device.ReportLoss("scheduler submit");
             [[fallthrough]];
         default:
             vk::Check(result);
