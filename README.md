@@ -19,6 +19,28 @@ Please don't report problems with this fork to the Eden developers.
 
 The patch has not been tested on hardware yet. It compiles (syntax-checked), but it has not been confirmed to stop the crash.
 
+## Background
+
+This fork started with Dragon Quest X Offline (Japanese, v2.0.1 with the English patch) crashing on Eden v0.2.1. The setup was an i7-14650HX laptop with an RTX 5060 Laptop GPU and 16 GB of RAM. About half the time, the game crashed on a loading screen after 6 to 24 minutes of play. Every crash log ended the same way:
+
+    Render.Vulkan <Critical> vulkan_device.cpp:773:ReportLoss: Device loss occurred!
+
+These were tried first, and none of them stopped the crash:
+
+- Disabling Extended Dynamic State, raising GPU accuracy to High, and lowering Fast GPU Time
+- Updating the NVIDIA driver from 591.91 to 617.42 and clearing the shader cache
+- Raising the Windows GPU timeout (TdrDelay and TdrDdiDelay set to 10 seconds)
+- Removing the English patch, and removing the update that adds the DLC content
+- Switching to OpenGL, which didn't boot at all
+
+The same game files run on Ryubing without crashing, only slower. That pointed to a problem in Eden rather than in the game, the patch or the hardware.
+
+The latest Eden master build was worse: it lost the GPU after about 100 seconds. Its log also showed an error that never appeared on v0.2.1:
+
+    core\memory.cpp: assert current_block != 65535
+
+Following that assert through the source led to the `GetSpan` bug described below. It explains why master crashes much sooner. The original v0.2.1 crash may have a separate cause. One open candidate is the dual-GPU laptop issue reported upstream ([Issue-Reports #257](https://github.com/eden-emulator/Issue-Reports/issues/257)), which is why this fork also logs where each device loss is detected.
+
 ## What changed
 
 ### Memory span contiguity check (`src/core/memory.cpp`)
