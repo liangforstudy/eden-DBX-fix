@@ -48,8 +48,13 @@ The latest Eden master build was worse: it lost the GPU after about 100 seconds.
 
     core\memory.cpp: assert current_block != 65535
 
-Following that assert through the source led to the `GetSpan` bug described below. It explains why master crashes much sooner. The original v0.2.1 crash may have a separate cause. One open candidate is the dual-GPU laptop issue reported upstream ([Issue-Reports #257](https://github.com/eden-emulator/Issue-Reports/issues/257)), which is why this fork also logs where each device loss is detected.
+Following that assert through the source led to the `GetSpan` bug described below. It explains why master crashes much sooner, but not the original v0.2.1 crash, which has a separate cause:
 
+- It isn't the dual-GPU laptop issue ([Issue-Reports #257](https://github.com/eden-emulator/Issue-Reports/issues/257)). The crash still happens with the laptop's MUX switch set to dGPU-only (Ultimate) mode.
+- It isn't specific to the RTX 5060 or newer drivers. It reproduces on a second laptop with a GTX 1050 and driver 546.33, about 2 to 3 minutes in when leaving a building, with the English patch both active and not active.
+- Disabling the DLC couldn't be tested: the game aborts with error 2162-0001 when a save made with the DLC is loaded without it.
+
+This fork also logs where each device loss is detected, to help narrow down the remaining cause.
 ## What changed
 
 ### Memory span contiguity check (`src/core/memory.cpp`)
