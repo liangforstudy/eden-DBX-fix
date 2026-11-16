@@ -8,7 +8,7 @@
 
 # Eden-DBX-fix
 
-An unofficial fork of the [Eden](https://git.eden-emu.dev/eden-emu/eden/) Nintendo Switch emulator. It contains a small patch aimed at Vulkan "Device loss" crashes seen in Dragon Quest X Offline (0100E2E0152E4000) on an RTX 5060 Laptop GPU.
+An unofficial fork of the [Eden](https://git.eden-emu.dev/eden-emu/eden/) Nintendo Switch emulator. It contains a small patch for one of the causes of the Vulkan "Device loss" crashes in Dragon Quest X Offline (0100E2E0152E4000), reported upstream in [Issue-Reports #777](https://github.com/eden-emulator/Issue-Reports/issues/777).
 
 Everything else is upstream Eden as of 4 Nov 2026. For general documentation, downloads, builds and support, go to the upstream project:
 https://git.eden-emu.dev/eden-emu/eden/
@@ -17,7 +17,16 @@ Please don't report problems with this fork to the Eden developers.
 
 ## Status
 
-The patch has not been tested on hardware yet. It compiles (syntax-checked), but it has not been confirmed to stop the crash.
+This patch fixes one crash cause but not the device loss reported in #777.
+
+- **Fixed here:** the `current_block` overflow that only affects newer Eden master builds (see [Memory span contiguity check](#memory-span-contiguity-check-srccorememorycpp)). On master it made the game lose the GPU after about 100 seconds.
+- **Still unfixed:** the device loss on Eden v0.2.1, which happens without the overflow. Lichii, an Eden fork that includes an equivalent fix, logs `Page table block ids are exhausted; validating spans page by page` at 25 seconds, so the overflow is handled there. It still loses the GPU at 111 seconds. Its Vulkan fault report shows what's left:
+
+      Device fault address 0: invalid write at 0x0 (range [0x0, 0x1000))
+
+  The GPU writes through an empty address, probably a buffer or render target that Eden never gave memory to.
+
+The patch has been syntax-checked but not built or run on hardware.
 
 ## Background
 
