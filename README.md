@@ -40,7 +40,7 @@ These were tried first, and none of them stopped the crash:
 - Updating the NVIDIA driver from 591.91 to 617.42 and clearing the shader cache
 - Raising the Windows GPU timeout (TdrDelay and TdrDdiDelay set to 10 seconds)
 - Removing the English patch, and removing the update that adds the DLC content
-- Switching to OpenGL, which didn't boot at all
+- Switching to OpenGL: on Eden the game didn't start. On Lichii it ran, but with washed-out colours.
 
 The same game files run on Ryubing without crashing, only slower. That pointed to a problem in Eden rather than in the game, the patch or the hardware.
 
