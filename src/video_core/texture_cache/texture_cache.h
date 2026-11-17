@@ -987,7 +987,8 @@ void TextureCache<P>::PopAsyncFlushes() {
 }
 
 template <class P>
-ImageId TextureCache<P>::DmaImageId(const Tegra::DMA::ImageOperand& operand, bool is_upload) {
+ImageId TextureCache<P>::DmaImageId(const Tegra::DMA::ImageOperand& operand,
+                                    const Tegra::DMA::ImageCopy& copy_info, bool is_upload) {
     const ImageInfo dst_info(operand);
     const ImageId dst_id = FindDMAImage(dst_info, operand.address);
     if (!dst_id) {
@@ -1009,6 +1010,26 @@ ImageId TextureCache<P>::DmaImageId(const Tegra::DMA::ImageOperand& operand, boo
     }
     const auto base = image.TryFindBase(operand.address);
     if (!base) {
+        return NULL_IMAGE_ID;
+    }
+    // The matched image can be smaller than the surface the guest copies to. Let the software
+    // path handle those copies instead of writing or reading outside the host image.
+    const u32 bpp = VideoCore::Surface::BytesPerBlock(image.info.format);
+    const auto convert = [&](u32 value) { return (operand.bytes_per_pixel * value) / bpp; };
+    const Extent3D level_size = MipSize(image.info.size, base->level);
+    const u64 end_x = u64{convert(operand.params.origin.x.Value())} + convert(copy_info.length_x);
+    const u64 end_y = u64{operand.params.origin.y.Value()} + copy_info.length_y;
+    if (end_x > level_size.width || end_y > level_size.height) {
+        static std::atomic<u32> reports{0};
+        if (reports.fetch_add(1, std::memory_order_relaxed) < 16) {
+            LOG_WARNING(HW_GPU,
+                        "DMA {} of {}x{} at ({},{}) does not fit level {} ({}x{}) of image "
+                        "{}x{}, using the software path",
+                        is_upload ? "upload" : "download", convert(copy_info.length_x),
+                        copy_info.length_y, convert(operand.params.origin.x.Value()),
+                        operand.params.origin.y.Value(), base->level, level_size.width,
+                        level_size.height, image.info.size.width, image.info.size.height);
+        }
         return NULL_IMAGE_ID;
     }
     return dst_id;

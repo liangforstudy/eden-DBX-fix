@@ -5,7 +5,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <algorithm>
+#include <atomic>
 #include <limits>
+#include <string_view>
 #include <array>
 #include <optional>
 #include <span>
@@ -615,6 +617,58 @@ struct RangedBarrierRange {
         };
     }
 };
+// Clamps upload regions that would write past the destination image and logs the first few.
+// An oversized region writes outside the image's memory and can lose the device.
+void ClampUploadCopies(boost::container::small_vector<VkBufferImageCopy, 16>& copies,
+                       VkExtent3D extent, bool is_3d, const ImageInfo& info,
+                       std::string_view target) {
+    static std::atomic<u32> reports{0};
+    for (auto& copy : copies) {
+        const u32 level = copy.imageSubresource.mipLevel;
+        const u32 w = (std::max)(1u, extent.width >> level);
+        const u32 h = (std::max)(1u, extent.height >> level);
+        const u32 d = is_3d ? (std::max)(1u, extent.depth >> level) : 1u;
+        const auto& o = copy.imageOffset;
+        auto& e = copy.imageExtent;
+        if (o.x >= 0 && o.y >= 0 && o.z >= 0 && u32(o.x) + e.width <= w &&
+            u32(o.y) + e.height <= h && u32(o.z) + e.depth <= d) {
+            continue;
+        }
+        if (reports.fetch_add(1, std::memory_order_relaxed) < 32) {
+            LOG_ERROR(Render_Vulkan,
+                      "Oversized {} upload clamped: level {} offset ({},{},{}) extent {}x{}x{} > "
+                      "{}x{}x{}; image {}x{}x{} type={} format={} samples={} levels={} "
+                      "layers={} block=({},{},{}) row_length={} image_height={}",
+                      target, level, o.x, o.y, o.z, e.width, e.height, e.depth, w, h, d,
+                      info.size.width, info.size.height, info.size.depth,
+                      static_cast<int>(info.type), static_cast<int>(info.format),
+                      info.num_samples, info.resources.levels, info.resources.layers,
+                      info.block.width, info.block.height, info.block.depth,
+                      copy.bufferRowLength, copy.bufferImageHeight);
+        }
+        // Keep the source layout of the original region while shrinking it.
+        if (copy.bufferRowLength == 0) {
+            copy.bufferRowLength = e.width;
+        }
+        if (copy.bufferImageHeight == 0) {
+            copy.bufferImageHeight = e.height;
+        }
+        const auto fit = [](s32 offset, u32 size, u32 limit) {
+            return offset < 0 || u32(offset) >= limit ? 0u : (std::min)(size, limit - u32(offset));
+        };
+        e.width = fit(o.x, e.width, w);
+        e.height = fit(o.y, e.height, h);
+        e.depth = fit(o.z, e.depth, d);
+    }
+    copies.erase(std::remove_if(copies.begin(), copies.end(),
+                                [](const VkBufferImageCopy& copy) {
+                                    return copy.imageExtent.width == 0 ||
+                                           copy.imageExtent.height == 0 ||
+                                           copy.imageExtent.depth == 0;
+                                }),
+                 copies.end());
+}
+
 void CopyBufferToImage(vk::CommandBuffer cmdbuf, VkBuffer src_buffer, VkImage image,
                        VkImageAspectFlags aspect_mask, bool is_initialized,
                        std::span<const VkBufferImageCopy> copies) {
@@ -1878,7 +1932,8 @@ Image::Image(TextureCacheRuntime& runtime_, const ImageInfo& info_, GPUVAddr gpu
       runtime{&runtime_},
       original_image(MakeImage(runtime_.device, runtime_.memory_allocator, info,
                                runtime->ViewFormats(info.format))),
-      aspect_mask(ImageAspectMask(info.format)) {
+      aspect_mask(ImageAspectMask(info.format)),
+      created_extent(MakeImageCreateInfo(runtime_.device, info).extent) {
     if (IsPixelFormatASTC(info.format) && !runtime->device.IsOptimalAstcSupported()) {
         switch (Settings::values.accelerate_astc.GetValue()) {
         case Settings::AstcDecodeMode::Gpu:
@@ -2001,13 +2056,18 @@ void Image::UploadMemory(VkBuffer buffer, VkDeviceSize offset,
 
         scheduler->RequestOutsideRenderPassOperationContext();
         auto vk_copies = TransformBufferImageCopies(copies, offset, upload_aspect_mask);
+        ClampUploadCopies(vk_copies, image_ci.extent, image_ci.imageType == VK_IMAGE_TYPE_3D,
+                          info, "MSAA scratch");
         const VkBuffer src_buffer = buffer;
         const VkImageAspectFlags vk_aspect_mask = upload_aspect_mask;
 
-        scheduler->Record([src_buffer, temp_vk_image, vk_aspect_mask,
-                           vk_copies](vk::CommandBuffer cmdbuf) {
-            CopyBufferToImage(cmdbuf, src_buffer, temp_vk_image, vk_aspect_mask, false, vk_copies);
-        });
+        if (!vk_copies.empty()) {
+            scheduler->Record([src_buffer, temp_vk_image, vk_aspect_mask,
+                               vk_copies](vk::CommandBuffer cmdbuf) {
+                CopyBufferToImage(cmdbuf, src_buffer, temp_vk_image, vk_aspect_mask, false,
+                                  vk_copies);
+            });
+        }
 
         const auto [samples_x, samples_y] = VideoCommon::SamplesLog2(info.num_samples);
         boost::container::small_vector<VideoCommon::ImageCopy, 16> image_copies;
@@ -2053,15 +2113,19 @@ void Image::UploadMemory(VkBuffer buffer, VkDeviceSize offset,
 
     scheduler->RequestOutsideRenderPassOperationContext();
     auto vk_copies = TransformBufferImageCopies(copies, offset, aspect_mask);
+    ClampUploadCopies(vk_copies, created_extent, info.type == ImageType::e3D, info, "image");
     const VkBuffer src_buffer = buffer;
     const VkImage vk_image = *original_image;
     const VkImageAspectFlags vk_aspect_mask = aspect_mask;
-    const bool was_initialized = std::exchange(initialized, true);
+    const bool was_initialized = vk_copies.empty() ? initialized : std::exchange(initialized, true);
 
-    scheduler->Record([src_buffer, vk_image, vk_aspect_mask, was_initialized,
-                       vk_copies](vk::CommandBuffer cmdbuf) {
-        CopyBufferToImage(cmdbuf, src_buffer, vk_image, vk_aspect_mask, was_initialized, vk_copies);
-    });
+    if (!vk_copies.empty()) {
+        scheduler->Record([src_buffer, vk_image, vk_aspect_mask, was_initialized,
+                           vk_copies](vk::CommandBuffer cmdbuf) {
+            CopyBufferToImage(cmdbuf, src_buffer, vk_image, vk_aspect_mask, was_initialized,
+                              vk_copies);
+        });
+    }
 
     if (is_rescaled) {
         ScaleUp();

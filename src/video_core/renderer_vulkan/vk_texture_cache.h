@@ -388,6 +388,7 @@ private:
 
     std::vector<vk::ImageView> storage_image_views;
     VkImageAspectFlags aspect_mask = 0;
+    VkExtent3D created_extent{};
     bool initialized = false;
 
     std::optional<Framebuffer> scale_framebuffer;
