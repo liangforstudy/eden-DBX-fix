@@ -26,7 +26,7 @@ If anything there (or here) is confusing, [open an issue](../../issues) and ask.
 | Cause | What it does | Status |
 |---|---|---|
 | **A.** Page-table block id overflow | Newer Eden master builds log `assert current_block != 65535`, then lose the GPU about 100 s later | Fixed |
-| **B.** Oversized DMA texture copy | Loses the GPU on a loading screen or map change, 2 to 25 minutes in. This is the crash in #777 | Fixed, being tested |
+| **B.** Oversized DMA (direct memory access) texture copy | Loses the GPU on a loading screen or map change, 2 to 25 minutes in. This is the crash in #777 | Fixed, being tested |
 
 Tested on an i7-8750H with a GTX 1050 (driver 546.33):
 
@@ -71,7 +71,7 @@ It also reproduces on a second laptop with a GTX 1050. The same game files run o
 
 ### Oversized DMA texture copies (`src/video_core/texture_cache/texture_cache.h`)
 
-The Switch GPU has a copy engine (DMA) that games use to move pixel data into textures. Eden speeds it up by finding the texture it already has at the destination address and copying straight into it on the host GPU. The copy size comes from the game's command, and Eden never checked it against the texture it found.
+The Switch GPU has a copy engine that games use to move pixel data into textures. It works by DMA (direct memory access): it copies memory on its own, without the CPU doing the work. Eden speeds it up by finding the texture it already has at the destination address and copying straight into it on the host GPU. The copy size comes from the game's command, and Eden never checked it against the texture it found.
 
 In Dragon Quest X, the game copies an 8×8 RGBA16F block (plus 4×4 and 2×2 levels) to an address where Eden's texture is only 8×4, 8×2 or 8×1, with one level. The extra rows are written past the end of the texture. When that memory isn't mapped, the GPU faults and Windows resets the driver.
 
