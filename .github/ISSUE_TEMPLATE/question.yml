@@ -1,0 +1,18 @@
+name: Question
+description: Ask anything about this fork, the explainer or the README
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: No question is too basic. If something in the explainer or the README didn't make sense, say which part.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where did you get stuck? (optional)
+      placeholder: e.g. the "Clamp backstop" mode in the explainer, or the Download steps

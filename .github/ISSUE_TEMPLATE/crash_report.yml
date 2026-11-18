@@ -1,0 +1,53 @@
+name: Crash report
+description: The game crashed or froze on this build
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing. Before filling this in, close Eden, then copy `%APPDATA%\eden\log\eden_log.txt` somewhere safe. Each launch replaces it.
+  - type: input
+    id: game
+    attributes:
+      label: Game and version
+      placeholder: Dragon Quest X Offline 2.0.1, English patch, with DLC
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Build
+      description: From the Eden title bar or the first line of the log.
+      placeholder: 6c7c1b5-master
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver version
+      placeholder: GTX 1050, NVIDIA 546.33
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you were doing, roughly how long you'd played, and what the screen did (froze, went black, closed).
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log file
+      description: Drag `eden_log.txt` into this box to attach it.
+    validations:
+      required: true
+  - type: dropdown
+    id: debug
+    attributes:
+      label: Was graphics debugging on?
+      description: Emulation > Configure > Debug > Enable Graphics Debugging
+      options:
+        - "No"
+        - "Yes"
+        - I don't know
