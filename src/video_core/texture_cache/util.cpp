@@ -1015,6 +1015,14 @@ boost::container::small_vector<BufferImageCopy, 16> FullDownloadCopies(const Ima
         }};
     }
     UNIMPLEMENTED_IF(info.tile_width_spacing > 0);
+    if (info.tile_width_spacing > 0) {
+        LOG_ERROR(HW_GPU,
+                  "Download of image with tile_width_spacing={}: {}x{}x{} format={} levels={} "
+                  "layers={} block=({},{},{})",
+                  info.tile_width_spacing, info.size.width, info.size.height, info.size.depth,
+                  static_cast<int>(info.format), info.resources.levels, info.resources.layers,
+                  info.block.width, info.block.height, info.block.depth);
+    }
 
     const s32 num_layers = info.resources.layers;
     const s32 num_levels = info.resources.levels;

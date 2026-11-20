@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <atomic>
+#include <cstdlib>
 #include <limits>
 #include <optional>
 #include <bit>
@@ -34,6 +36,23 @@ using VideoCore::Surface::GetFormatType;
 using VideoCore::Surface::PixelFormat;
 using VideoCore::Surface::SurfaceType;
 using namespace Common::Literals;
+
+namespace DqxTrace {
+// Test-only: EDEN_DQX_TRACE=1 logs creation and deletion of small RGBA16F images, the kind the
+// DQX oversized DMA copies target.
+inline bool Enabled() {
+    static const bool enabled = [] {
+        const char* value = std::getenv("EDEN_DQX_TRACE");
+        return value != nullptr && *value != '\0' && *value != '0';
+    }();
+    return enabled;
+}
+
+inline bool IsSuspect(const ImageInfo& info) {
+    return info.format == PixelFormat::R16G16B16A16_FLOAT && info.size.width <= 16 &&
+           info.size.height <= 16;
+}
+} // namespace DqxTrace
 
 template <class P>
 TextureCache<P>::TextureCache(Runtime& runtime_, Tegra::MaxwellDeviceMemoryManager& device_memory_)
@@ -75,6 +94,24 @@ TextureCache<P>::TextureCache(Runtime& runtime_, Tegra::MaxwellDeviceMemoryManag
         expected_memory = DEFAULT_EXPECTED_MEMORY + 512_MiB;
         critical_memory = DEFAULT_CRITICAL_MEMORY + 1_GiB;
         minimum_memory = 0;
+    }
+
+    // Test-only: EDEN_DQX_TEXCACHE_SCALE=N divides the eviction thresholds by N, so the garbage
+    // collector starts evicting within minutes instead of hours.
+    if (const char* scale_env = std::getenv("EDEN_DQX_TEXCACHE_SCALE")) {
+        const u64 scale = std::strtoull(scale_env, nullptr, 10);
+        if (scale > 1) {
+            expected_memory /= scale;
+            critical_memory /= scale;
+            minimum_memory /= scale;
+            LOG_WARNING(HW_GPU,
+                        "EDEN_DQX_TEXCACHE_SCALE={}: texture cache thresholds divided, expected "
+                        "{} MiB, critical {} MiB, minimum {} MiB",
+                        scale, expected_memory >> 20, critical_memory >> 20, minimum_memory >> 20);
+        }
+    }
+    if (DqxTrace::Enabled()) {
+        LOG_WARNING(HW_GPU, "EDEN_DQX_TRACE on: logging small RGBA16F image lifetimes");
     }
 
     const bool gpu_unswizzle_enabled = Settings::values.gpu_unswizzle_enabled.GetValue();
@@ -1021,14 +1058,25 @@ ImageId TextureCache<P>::DmaImageId(const Tegra::DMA::ImageOperand& operand,
     const u64 end_y = u64{operand.params.origin.y.Value()} + copy_info.length_y;
     if (end_x > level_size.width || end_y > level_size.height) {
         static std::atomic<u32> reports{0};
-        if (reports.fetch_add(1, std::memory_order_relaxed) < 16) {
+        const u32 count = reports.fetch_add(1, std::memory_order_relaxed) + 1;
+        // Log the first 64 in full, then every 64th with the running total.
+        if (count <= 64 || count % 64 == 0) {
             LOG_WARNING(HW_GPU,
-                        "DMA {} of {}x{} at ({},{}) does not fit level {} ({}x{}) of image "
-                        "{}x{}, using the software path",
-                        is_upload ? "upload" : "download", convert(copy_info.length_x),
+                        "DMA {} #{} of {}x{} at ({},{}) does not fit level {} ({}x{}) of image "
+                        "{}x{}, using the software path. Guest surface {:#x} {}x{}x{} "
+                        "block=({},{},{}) bpp={}; image id={} {:#x} levels={} block=({},{},{}) "
+                        "flags={:#x}",
+                        is_upload ? "upload" : "download", count, convert(copy_info.length_x),
                         copy_info.length_y, convert(operand.params.origin.x.Value()),
                         operand.params.origin.y.Value(), base->level, level_size.width,
-                        level_size.height, image.info.size.width, image.info.size.height);
+                        level_size.height, image.info.size.width, image.info.size.height,
+                        operand.address, operand.params.width, operand.params.height,
+                        operand.params.depth, operand.params.block_size.width.Value(),
+                        operand.params.block_size.height.Value(),
+                        operand.params.block_size.depth.Value(), operand.bytes_per_pixel,
+                        dst_id.index, image.gpu_addr, image.info.resources.levels,
+                        image.info.block.width, image.info.block.height, image.info.block.depth,
+                        static_cast<u32>(image.flags));
         }
         return NULL_IMAGE_ID;
     }
@@ -1549,6 +1597,15 @@ ImageId TextureCache<P>::InsertImage(const ImageInfo& info, GPUVAddr gpu_addr,
     ASSERT_MSG(cpu_addr, "Tried to insert an image to an invalid gpu_addr={:#x}", gpu_addr);
     const ImageId image_id = JoinImages(info, gpu_addr, *cpu_addr);
     const Image& image = slot_images[image_id];
+    if (DqxTrace::Enabled() && DqxTrace::IsSuspect(image.info)) {
+        LOG_INFO(HW_GPU,
+                 "DQX image create id={} gpu={:#x} {}x{} levels={} layers={} type={} "
+                 "flags={:#x} tick={} cache={} MiB",
+                 image_id.index, image.gpu_addr, image.info.size.width, image.info.size.height,
+                 image.info.resources.levels, image.info.resources.layers,
+                 static_cast<int>(image.info.type), static_cast<u32>(image.flags), frame_tick,
+                 total_used_memory >> 20);
+    }
     // Using "image.gpu_addr" instead of "gpu_addr" is important because it might be different
     const auto [it, is_new] = image_allocs_table.try_emplace(image.gpu_addr);
     if (is_new) {
@@ -2337,6 +2394,14 @@ void TextureCache<P>::UntrackImage(ImageBase& image, ImageId image_id) {
 template <class P>
 void TextureCache<P>::DeleteImage(ImageId image_id, bool immediate_delete) {
     ImageBase& image = slot_images[image_id];
+    if (DqxTrace::Enabled() && DqxTrace::IsSuspect(image.info)) {
+        LOG_INFO(HW_GPU,
+                 "DQX image delete id={} gpu={:#x} {}x{} levels={} flags={:#x} tick={} "
+                 "cache={} MiB",
+                 image_id.index, image.gpu_addr, image.info.size.width, image.info.size.height,
+                 image.info.resources.levels, static_cast<u32>(image.flags), frame_tick,
+                 total_used_memory >> 20);
+    }
     if (image.HasScaled()) {
         total_used_memory -= GetScaledImageSizeBytes(image);
     }
