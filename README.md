@@ -47,7 +47,7 @@ The GTX 1050 is an i7-8750H laptop with driver 546.33. The RTX 5060 is the origi
 
 ### Bright interiors and noisy textures
 
-After about 2 hours of play, some house interiors become extremely bright: only the minimap and menus stay visible. Once a room breaks it stays broken, even after leaving, re-entering or loading an older save, until Eden is restarted. Any house can be affected, and rooms visited earlier keep looking normal. Some textures, such as floor tiles and character portraits, can also turn into streaky noise.
+After about 2 hours of play, some areas become extremely bright: only the minimap and menus stay visible. It was first seen in house interiors, and has since also hit an entire outdoor desert map. Once a room breaks it stays broken, even after leaving, re-entering or loading an older save, until Eden is restarted. Any house can be affected, and rooms visited earlier keep looking normal. Some textures, such as floor tiles and character portraits, can also turn into streaky noise.
 
 This isn't caused by the crash fix: it happened before it too, but the crash stopped anyone playing that long. Because a restart fixes it and loading a save doesn't, the bad data is most likely in Eden's texture cache, which keeps textures on the GPU and only throws old ones away when memory runs low. That would explain why it takes hours. The exact cause isn't known yet, and none of the shorter test runs so far have reproduced it.
 
@@ -64,6 +64,8 @@ Get `eden.exe` from the [Releases](../../releases) page. Use the newest one, **t
 Building it yourself is possible (see [Building](#building)), but it takes a few hours of setup. That's why there's a ready-made exe.
 
 If it still crashes, close Eden, then attach `%APPDATA%\eden\log\eden_log.txt` to an issue here. Copy the log before you launch Eden again, because each launch replaces it.
+
+Before testing, turn on **Emulation > Configure > Debug > Flush log output on each line**. Eden normally writes its log in chunks, so a log can come out empty or cut short if Eden freezes or is force-closed. With this ticked, every line is saved as it happens. It costs a little performance.
 
 ### Test switches
 

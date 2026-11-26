@@ -6,6 +6,8 @@ body:
     attributes:
       value: |
         Thanks for testing. Before filling this in, close Eden, then copy `%APPDATA%\eden\log\eden_log.txt` somewhere safe. Each launch replaces it.
+
+        If the log is empty or cut short, Eden probably froze or was force-closed before it saved the log. Check `eden_log.txt.old.txt` too, and for next time tick **Emulation > Configure > Debug > Flush log output on each line**, so every line is saved as it happens.
   - type: input
     id: game
     attributes:
@@ -39,9 +41,18 @@ body:
     id: log
     attributes:
       label: Log file
-      description: Drag `eden_log.txt` into this box to attach it.
+      description: Drag `eden_log.txt` into this box to attach it. If it's empty, say so and attach `eden_log.txt.old.txt` as well.
     validations:
       required: true
+  - type: dropdown
+    id: flush
+    attributes:
+      label: Was "Flush log output on each line" on?
+      description: Emulation > Configure > Debug
+      options:
+        - "No"
+        - "Yes"
+        - I don't know
   - type: dropdown
     id: debug
     attributes:
