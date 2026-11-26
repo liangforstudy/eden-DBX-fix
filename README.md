@@ -29,7 +29,7 @@ If anything there (or here) is confusing, [open an issue](../../issues) and ask.
 |---|---|---|
 | **A.** Page-table block id overflow | Newer Eden master builds log `assert current_block != 65535`, then lose the GPU about 100 s later | Fixed |
 | **B.** Oversized DMA (direct memory access) texture copy | Loses the GPU on a loading screen or map change, 2 to 25 minutes in. This is the crash in #777 | Fixed, confirmed |
-| Bright interiors and noisy textures | After about 2 hours, some rooms turn blinding white until Eden restarts | Not fixed, being investigated (see [Known issues](#known-issues)) |
+| Bright interiors and noisy textures | After about 2 hours, some rooms turn blinding white until Eden restarts | Possible fix in test build 3, not confirmed yet (see [Known issues](#known-issues)) |
 
 | Run | Machine | Build | Result |
 |---|---|---|---|
@@ -49,13 +49,15 @@ The GTX 1050 is an i7-8750H laptop with driver 546.33. The RTX 5060 is the origi
 
 After about 2 hours of play, some areas become extremely bright: only the minimap and menus stay visible. It was first seen in house interiors, and has since also hit an entire outdoor desert map. Once a room breaks it stays broken, even after leaving, re-entering or loading an older save, until Eden is restarted. Any house can be affected, and rooms visited earlier keep looking normal. Some textures, such as floor tiles and character portraits, can also turn into streaky noise.
 
-This isn't caused by the crash fix: it happened before it too, but the crash stopped anyone playing that long. Because a restart fixes it and loading a save doesn't, the bad data is most likely in Eden's texture cache, which keeps textures on the GPU and only throws old ones away when memory runs low. That would explain why it takes hours. The exact cause isn't known yet, and none of the shorter test runs so far have reproduced it.
+This isn't caused by the crash fix: it happened before it too, but the crash stopped anyone playing that long. Because a restart fixes it and loading a save doesn't, the bad data is most likely in Eden's texture cache, which keeps textures on the GPU and only throws old ones away when memory runs low. That would explain why it takes hours. The exact cause isn't confirmed, and none of the shorter test runs so far have reproduced it.
 
-Test build 2 has switches to help reproduce it faster. See [Test switches](#test-switches). If a room turns bright for you, please [open a Crash report](../../issues/new/choose) with which house it was, roughly when, and the log.
+The best lead so far: in one log, the only DMA copy the size check sent to the slow path came about 29 minutes in, around when an outdoor map went white. That path wrote old data over textures the GPU had drawn (see [Stale writes in the slow DMA path](#stale-writes-in-the-slow-dma-path)). Test build 3 fixes that, and whether the white areas are gone is still being tested.
+
+Test builds 2 and 3 have switches to help reproduce it faster. See [Test switches](#test-switches). If a room turns bright for you, please [open a Crash report](../../issues/new/choose) with which house it was, roughly when, and the log.
 
 ## Download
 
-Get `eden.exe` from the [Releases](../../releases) page. Use the newest one, **test build 2** (`dqx-fix-2`): a Release build with the crash fix and the test switches below. The symbols zip is only needed for analysing a crash dump from that exact build.
+Get `eden.exe` from the [Releases](../../releases) page. Use the newest one, **test build 3** (`dqx-fix-3`, title bar `9ac13ba02d`): a Release build with the crash fix, a possible fix for the bright areas, and the test switches below. The symbols zip is only needed for analysing a crash dump from that exact build.
 
 1. Install the latest [Microsoft Visual C++ Redistributable (x64)](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist). The build uses the Visual Studio 2026 runtime, and with an older one installed `eden.exe` may not start.
 2. Run `eden.exe`. Windows will show **"Windows protected your PC"**, because the file isn't signed. Click **More info**, then **Run anyway**. This only appears the first time.
@@ -69,7 +71,7 @@ Before testing, turn on **Emulation > Configure > Debug > Flush log output on ea
 
 ### Test switches
 
-Test build 2 has two switches for hunting the bright-room bug. Both are off unless you set them, and they only apply when Eden is started from PowerShell like this, in the folder where you unzipped it:
+Test builds 2 and 3 have two switches for hunting the bright-room bug. Both are off unless you set them, and they only apply when Eden is started from PowerShell like this, in the folder where you unzipped it:
 
     $env:EDEN_DQX_TEXCACHE_SCALE=10; $env:EDEN_DQX_TRACE=1; .\eden.exe
 
@@ -113,6 +115,10 @@ In Dragon Quest X, the game copies an 8×8 RGBA16F block (plus 4×4 and 2×2 lev
     DMA upload #1 of 8x8 at (0,0) does not fit level 0 (8x4) of image 8x4, using the software path. Guest surface ... 64x8x1 ...; image id=117 ... levels=1 ...
 
 Each line shows both what the game says the surface is and which texture Eden matched. In Dragon Quest X the game treats each address as a full 8×8 surface (64 bytes × 8 rows, 512 bytes apart), while Eden's textures there are smaller render targets the GPU drew into.
+
+### Stale writes in the slow DMA path (`src/video_core/engines/maxwell_dma.cpp`)
+
+When Eden does a DMA copy through emulated memory, it reads the whole destination surface, puts the copied rows in, and writes the whole surface back. For copies between linear and tiled (block-linear) layouts, that read didn't first save what the GPU had drawn there. Any texture in the surface that only existed on the GPU was overwritten with old data. These copies now use the same safe read as Eden's other copy paths. This is test build 3's possible fix for the [bright areas](#known-issues).
 
 ### Upload clamp (`src/video_core/renderer_vulkan/vk_texture_cache.cpp`)
 
